@@ -1,0 +1,10 @@
+[template]
+cargo_generate_version = ">=0.18.0"
+
+[placeholders]
+project_name = { type = "string", prompt = "Project name", default = "dodge-the-creeps" }
+
+# Renaming happens in a hook rather than via {{placeholders}} in Cargo.toml,
+# so that a plain `git clone` still yields a valid, buildable project.
+[hooks]
+pre = ["hooks/rename.rhai"]

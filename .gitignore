@@ -1,0 +1,5 @@
+rust/target/
+godot/.godot/
+*.so
+*.dll
+*.dylib

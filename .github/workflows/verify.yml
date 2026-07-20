@@ -1,0 +1,129 @@
+name: verify
+
+# Runs on every change, and weekly with nobody touching anything — a template
+# can break because the world moved, not because the code did.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: "0 4 * * 1"   # Mondays 04:00 UTC
+  workflow_dispatch:
+
+env:
+  GODOT_PIN: "4.5.2"
+  GODOT_CANARY: "4.7.1"
+
+# GITHUB_TOKEN is read-only by default; these jobs write status back and
+# open issues, so the grants have to be explicit.
+permissions:
+  contents: write
+  issues: write
+
+jobs:
+  # ── STABLE: the exact combination a developer gets. Must stay green. ──
+  stable:
+    name: stable (pinned)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Cache cargo registry and build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: rust
+
+      - name: Build Rust library
+        working-directory: rust
+        run: cargo build --verbose
+
+      - name: Run Rust unit tests
+        working-directory: rust
+        run: cargo test --verbose
+
+      - name: Install Godot ${{ env.GODOT_PIN }} (headless)
+        run: |
+          URL="https://github.com/godotengine/godot/releases/download/${{ env.GODOT_PIN }}-stable/Godot_v${{ env.GODOT_PIN }}-stable_linux.x86_64.zip"
+          curl -sSL -o godot.zip "$URL"
+          unzip -q godot.zip
+          mv Godot_v${{ env.GODOT_PIN }}-stable_linux.x86_64 godot-bin
+          chmod +x godot-bin
+
+      - name: Import project and load the Rust library
+        # Catches what the compiler cannot see: library built but Godot can't
+        # load it, class name mismatch, scene referencing a missing node.
+        run: ./godot-bin --headless --path godot --import
+
+      - name: Write status
+        run: |
+          mkdir -p status
+          cat > status/stable.json <<EOF
+          {
+            "template": "dodge-the-creeps",
+            "lane": "stable",
+            "checked_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "versions": {
+              "godot": "${{ env.GODOT_PIN }}",
+              "rust": "1.90.0",
+              "gdext": "410580d477fe150e12fd9649cf5ab12a800a1884"
+            },
+            "build": "pass",
+            "tests": "pass",
+            "import": "pass"
+          }
+          EOF
+
+      - name: Publish status
+        if: github.event_name != 'pull_request'
+        uses: stefanzweifel/git-auto-commit-action@v5
+        with:
+          commit_message: "ci: update stable status"
+          file_pattern: status/*.json
+
+  # ── CANARY: builds against latest. Allowed to fail; failure is early warning. ──
+  canary:
+    name: canary (latest)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Unpin gdext and the toolchain
+        working-directory: rust
+        run: |
+          sed -i 's/, rev = "[a-f0-9]*"//' Cargo.toml
+          rm -f rust-toolchain.toml
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build against latest gdext
+        working-directory: rust
+        run: cargo build --verbose
+
+      - name: Install Godot ${{ env.GODOT_CANARY }} (headless)
+        run: |
+          URL="https://github.com/godotengine/godot/releases/download/${{ env.GODOT_CANARY }}-stable/Godot_v${{ env.GODOT_CANARY }}-stable_linux.x86_64.zip"
+          curl -sSL -o godot.zip "$URL"
+          unzip -q godot.zip
+          mv Godot_v${{ env.GODOT_CANARY }}-stable_linux.x86_64 godot-bin
+          chmod +x godot-bin
+
+      - name: Import on latest Godot
+        run: ./godot-bin --headless --path godot --import
+
+  # A red canary is a signal, not an outage — it means migration work is coming.
+  report-canary:
+    needs: canary
+    if: always() && needs.canary.result == 'failure'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Open a migration issue
+        run: |
+          gh issue list --label canary --state open --json number \
+            | grep -q '"number"' || \
+          gh issue create --label canary \
+            --title "Canary failing: upcoming toolchain break" \
+            --body "The canary lane failed. The pinned build is still green, so users are unaffected, but a future gdext/Godot upgrade will break this template. Investigate before bumping the pins."
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

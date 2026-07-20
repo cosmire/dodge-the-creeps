@@ -1,0 +1,17 @@
+Dodge the Creeps — Cosmire Template
+
+Rust source derived from godot-rust/demo-projects
+  https://github.com/godot-rust/demo-projects
+  Licensed under the Mozilla Public License 2.0.
+
+Godot project, scenes and art derived from the Godot Engine demo projects
+  Copyright (c) 2017 KidsCanCode
+  Licensed under the MIT License.
+
+Modifications by Cosmire:
+  - Detached from the upstream Cargo workspace to stand alone
+  - Pinned gdext to an exact revision (upstream tracks git master unpinned)
+  - Corrected .gdextension library paths for the standalone layout
+  - Added CI verification, cargo-generate support, and documentation
+
+Modified MPL-2.0 files remain under MPL-2.0.
