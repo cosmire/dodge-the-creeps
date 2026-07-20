@@ -1,0 +1,13 @@
+{
+  "template": "dodge-the-creeps",
+  "lane": "stable",
+  "checked_at": "2026-07-20T08:35:16Z",
+  "versions": {
+    "godot": "4.5.2",
+    "rust": "1.94.0",
+    "gdext": "410580d477fe150e12fd9649cf5ab12a800a1884"
+  },
+  "build": "pass",
+  "tests": "pass",
+  "import": "pass"
+}
