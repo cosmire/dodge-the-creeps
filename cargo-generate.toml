@@ -1,6 +1,10 @@
 [template]
 cargo_generate_version = ">=0.18.0"
 
+# Skip liquid templating entirely. We substitute nothing, and running the
+# templater over Rust source trips on format strings containing `{{`.
+exclude = ["**/*"]
+
 # No liquid placeholders and no rename hook, deliberately.
 #
 # Placeholders in Cargo.toml would make the file invalid TOML for anyone who

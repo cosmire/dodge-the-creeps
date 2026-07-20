@@ -71,19 +71,6 @@ jobs:
         # load it, class name mismatch, scene referencing a missing node.
         run: ./godot-bin --headless --path godot --import
 
-      - name: Verify cargo-generate scaffolding
-        # The rename hook is a second delivery path; if it breaks, `clone`
-        # and `generate` stop producing the same artifact.
-        run: |
-          cargo install cargo-generate --locked --quiet
-          cd /tmp
-          cargo generate --path "$GITHUB_WORKSPACE" --name cosmire-scaffold-test --silent
-          # The generate path must yield the same buildable project as a clone.
-          test -f cosmire-scaffold-test/rust/Cargo.toml
-          test -f cosmire-scaffold-test/godot/project.godot
-          test -f cosmire-scaffold-test/godot/rust.gdextension
-          test -f cosmire-scaffold-test/rust/rust-toolchain.toml
-
       - name: Write status
         run: |
           mkdir -p status
@@ -177,3 +164,20 @@ jobs:
             --body "The canary lane failed. The pinned build is still green, so users are unaffected, but a future gdext/Godot upgrade will break this template. Investigate before bumping the pins."
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Separate job: the delivery path is verified independently so a packaging
+  # problem cannot block the build status from publishing.
+  scaffold:
+    name: scaffold (cargo-generate)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Generate a project and check it matches a clone
+        run: |
+          cargo install cargo-generate --locked --quiet
+          cd /tmp
+          cargo generate --path "$GITHUB_WORKSPACE" --name cosmire-scaffold-test --silent
+          for f in rust/Cargo.toml rust/rust-toolchain.toml godot/project.godot godot/rust.gdextension; do
+            test -f "cosmire-scaffold-test/$f" || { echo "missing $f in generated project"; exit 1; }
+          done
