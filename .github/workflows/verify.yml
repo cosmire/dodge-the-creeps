@@ -7,7 +7,11 @@ on:
     branches: [main]
   pull_request:
   schedule:
-    - cron: "0 4 * * 1"   # Mondays 04:00 UTC
+    # Daily. Actions minutes are free for public repos, and the canary tracks
+    # a moving target — a daily run means one day of upstream commits to diff
+    # when it breaks, not seven. It also keeps the user-facing "verified"
+    # timestamp fresh.
+    - cron: "0 4 * * *"   # 04:00 UTC daily
   workflow_dispatch:
 
 env:
