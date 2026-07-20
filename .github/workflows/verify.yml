@@ -33,6 +33,19 @@ jobs:
         with:
           workspaces: rust
 
+      - name: Lockfile — generate on first run, then enforce
+        working-directory: rust
+        # A pinned rev alone is not reproducibility; the lockfile pins the
+        # whole dependency graph. Bootstraps itself, then --locked keeps it
+        # honest: the build fails if the lockfile would need to change.
+        run: |
+          if [ -f Cargo.lock ]; then
+            cargo build --locked --verbose
+          else
+            echo "No Cargo.lock — generating one to be committed."
+            cargo generate-lockfile
+          fi
+
       - name: Build Rust library
         working-directory: rust
         run: cargo build --verbose
@@ -53,6 +66,17 @@ jobs:
         # Catches what the compiler cannot see: library built but Godot can't
         # load it, class name mismatch, scene referencing a missing node.
         run: ./godot-bin --headless --path godot --import
+
+      - name: Verify cargo-generate scaffolding
+        # The rename hook is a second delivery path; if it breaks, `clone`
+        # and `generate` stop producing the same artifact.
+        run: |
+          cargo install cargo-generate --locked --quiet
+          cd /tmp
+          cargo generate --path "$GITHUB_WORKSPACE" --name cosmire-scaffold-test --silent
+          test -f cosmire-scaffold-test/rust/Cargo.toml
+          grep -q "cosmire-scaffold-test" cosmire-scaffold-test/rust/Cargo.toml \
+            || { echo "rename hook did not rewrite Cargo.toml"; exit 1; }
 
       - name: Write status
         run: |
@@ -78,13 +102,18 @@ jobs:
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "ci: update stable status"
-          file_pattern: status/*.json
+          file_pattern: status/*.json rust/Cargo.lock
 
   # ── CANARY: builds against latest. Allowed to fail; failure is early warning. ──
   canary:
     name: canary (latest)
     runs-on: ubuntu-latest
+    # Allowed to fail without failing the run, but the outcome is published
+    # explicitly — `continue-on-error` makes needs.<job>.result read as
+    # 'success' downstream, which silently disabled the reporting job.
     continue-on-error: true
+    outputs:
+      broke: ${{ steps.verdict.outputs.broke }}
     steps:
       - uses: actions/checkout@v4
 
@@ -97,6 +126,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
 
       - name: Build against latest gdext
+        id: build_latest
+        continue-on-error: true
         working-directory: rust
         run: cargo build --verbose
 
@@ -109,12 +140,25 @@ jobs:
           chmod +x godot-bin
 
       - name: Import on latest Godot
+        id: import_latest
+        continue-on-error: true
         run: ./godot-bin --headless --path godot --import
+
+      - name: Record canary verdict
+        id: verdict
+        if: always()
+        run: |
+          if [ "${{ steps.build_latest.outcome }}" = "failure" ] || \
+             [ "${{ steps.import_latest.outcome }}" = "failure" ]; then
+            echo "broke=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "broke=false" >> "$GITHUB_OUTPUT"
+          fi
 
   # A red canary is a signal, not an outage — it means migration work is coming.
   report-canary:
     needs: canary
-    if: always() && needs.canary.result == 'failure'
+    if: always() && needs.canary.outputs.broke == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
