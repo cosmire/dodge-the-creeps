@@ -1,10 +1,14 @@
 [template]
 cargo_generate_version = ">=0.18.0"
 
-[placeholders]
-project_name = { type = "string", prompt = "Project name", default = "dodge-the-creeps" }
-
-# Renaming happens in a hook rather than via {{placeholders}} in Cargo.toml,
-# so that a plain `git clone` still yields a valid, buildable project.
-[hooks]
-pre = ["hooks/rename.rhai"]
+# No liquid placeholders and no rename hook, deliberately.
+#
+# Placeholders in Cargo.toml would make the file invalid TOML for anyone who
+# just runs `git clone`, and cargo-generate's Rhai API has no file-content
+# read/write to rename things afterwards (only listdir/exists/rename/delete).
+# Shelling out to sed via system::command would break on Windows.
+#
+# So this template stays a valid, buildable project at all times and
+# cargo-generate acts as a faithful copy. Renaming is a documented manual
+# step — see README. That keeps clone and generate producing an identical
+# artifact, which matters more than saving three edits.

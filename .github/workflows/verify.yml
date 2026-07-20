@@ -74,9 +74,11 @@ jobs:
           cargo install cargo-generate --locked --quiet
           cd /tmp
           cargo generate --path "$GITHUB_WORKSPACE" --name cosmire-scaffold-test --silent
+          # The generate path must yield the same buildable project as a clone.
           test -f cosmire-scaffold-test/rust/Cargo.toml
-          grep -q "cosmire-scaffold-test" cosmire-scaffold-test/rust/Cargo.toml \
-            || { echo "rename hook did not rewrite Cargo.toml"; exit 1; }
+          test -f cosmire-scaffold-test/godot/project.godot
+          test -f cosmire-scaffold-test/godot/rust.gdextension
+          test -f cosmire-scaffold-test/rust/rust-toolchain.toml
 
       - name: Write status
         run: |

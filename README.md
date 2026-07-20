@@ -30,6 +30,20 @@ cargo generate --git https://github.com/cosmire/dodge-the-creeps.git
 ```
 Both routes produce the same project.
 
+## Renaming it
+
+The project keeps its original name on clone or generate. To rename it, edit
+three places:
+
+| File | Change |
+|---|---|
+| `rust/Cargo.toml` | `name = "dodge-the-creeps"` |
+| `godot/rust.gdextension` | library filenames — `libdodge_the_creeps.so` and friends |
+| `godot/project.godot` | `config/name="Dodge the Creeps"` |
+
+The crate name and the library filenames must match, or Godot will not find
+the compiled library.
+
 ## Layout
 
 - `rust/` — game logic, one module per system
