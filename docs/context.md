@@ -30,7 +30,7 @@ Rust compiles to a cdylib; Godot loads it through `godot/rust.gdextension`.
 
 ## Pinned versions
 - Godot 4.5.2
-- Rust 1.90.0
+- Rust 1.94.0
 - gdext rev `410580d477fe150e12fd9649cf5ab12a800a1884`
 
 ## Where to add things

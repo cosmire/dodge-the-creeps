@@ -9,7 +9,7 @@ A **Cosmire Template** — open source, and verified to build.
 | | |
 |---|---|
 | Godot | 4.5.2 |
-| Rust | 1.90.0 |
+| Rust | 1.94.0 |
 | gdext | `410580d477fe` |
 
 Pinned together as one tested combination, rebuilt weekly by CI. The badge on

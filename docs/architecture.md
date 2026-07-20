@@ -34,7 +34,7 @@ file is the whole bridge.
 
 ## Pinned versions
 
-Godot 4.5.2, Rust 1.90.0, gdext `410580d477fe`.
+Godot 4.5.2, Rust 1.94.0, gdext `410580d477fe`.
 
 These are pinned *together* as one tested combination. gdext is pre-1.0 and
 moves quickly; an unpinned build changes under you without warning. CI verifies

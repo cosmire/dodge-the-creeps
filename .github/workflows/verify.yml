@@ -64,7 +64,7 @@ jobs:
             "checked_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "versions": {
               "godot": "${{ env.GODOT_PIN }}",
-              "rust": "1.90.0",
+              "rust": "1.94.0",
               "gdext": "410580d477fe150e12fd9649cf5ab12a800a1884"
             },
             "build": "pass",
