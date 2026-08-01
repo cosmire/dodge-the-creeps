@@ -1,7 +1,7 @@
 {
   "template": "dodge-the-creeps",
   "lane": "stable",
-  "checked_at": "2026-07-31T06:43:36Z",
+  "checked_at": "2026-08-01T06:28:56Z",
   "versions": {
     "godot": "4.5.2",
     "rust": "1.94.0",
