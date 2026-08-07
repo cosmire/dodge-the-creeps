@@ -50,13 +50,26 @@ jobs:
             cargo generate-lockfile
           fi
 
+      # Each check records its outcome instead of aborting the job. Without
+      # this a failure stops the run before status is written, the previous
+      # green file stays published, and the site reports a pass for a template
+      # that is broken — the one thing the status panel exists to prevent.
+      # The job is still failed deliberately at the end, after publishing.
       - name: Build Rust library
+        id: build
+        continue-on-error: true
         working-directory: rust
         run: cargo build --verbose
 
       - name: Run Rust unit tests
+        id: tests
+        continue-on-error: true
         working-directory: rust
-        run: cargo test --verbose
+        # Counted rather than pass/fail: the site renders "40/42" in red on its
+        # own, so publishing the real numbers says more than a verdict does.
+        run: |
+          set -o pipefail
+          cargo test --verbose 2>&1 | tee /tmp/test-output.txt
 
       - name: Install Godot ${{ env.GODOT_PIN }} (headless)
         run: |
@@ -67,11 +80,57 @@ jobs:
           chmod +x godot-bin
 
       - name: Import project and load the Rust library
+        id: import
+        continue-on-error: true
         # Catches what the compiler cannot see: library built but Godot can't
         # load it, class name mismatch, scene referencing a missing node.
         run: ./godot-bin --headless --path godot --import
 
+      # Everything below is measured, not asserted. A number typed into this
+      # file is a claim; a number counted here is a fact.
+      - name: Measure the template
+        id: measure
+        if: always()
+        run: |
+          # Modules are declared in lib.rs, which registers classes and nothing
+          # else. Counting declarations rather than files or directories works
+          # whether a module is foo.rs or foo/mod.rs.
+          echo "modules=$(grep -c '^mod ' rust/src/lib.rs || echo 0)" >> "$GITHUB_OUTPUT"
+          echo "loc=$(find rust/src -name '*.rs' -not -path '*/target/*' -exec cat {} + | wc -l)" >> "$GITHUB_OUTPUT"
+
+          # Provenance is checkable only as far as the record existing. Whether
+          # its contents are true is not something a machine can judge, and the
+          # page claims no more than that.
+          if [ -s NOTICE ]; then echo "notice=pass" >> "$GITHUB_OUTPUT"
+          else echo "notice=fail" >> "$GITHUB_OUTPUT"; fi
+
+          echo "rust=$(rustc --version | cut -d' ' -f2)" >> "$GITHUB_OUTPUT"
+
+          # Cargo.toml pins an exact rev; Cargo.lock knows which release that
+          # commit belongs to. The rev is what we pin, the release is what a
+          # developer recognises, so the page shows both.
+          VER=$(awk '/^name = "godot"$/{f=1} f&&/^version = /{gsub(/"/,"",$3); print $3; exit}' rust/Cargo.lock)
+          # head -1 because a git source carries the rev twice, once in the
+          # query and once in the fragment: ...?rev=410580d...#410580d...
+          REV=$(awk '/^name = "godot"$/{f=1} f&&/^source = /{print; exit}' rust/Cargo.lock \
+                | grep -o '[0-9a-f]\{40\}' | head -1 || true)
+          echo "gdext=${VER}" >> "$GITHUB_OUTPUT"
+          echo "gdext_rev=${REV}" >> "$GITHUB_OUTPUT"
+
+          # "40/42" if the numbers are there, otherwise the step outcome.
+          PASSED=$(grep -oE '[0-9]+ passed' /tmp/test-output.txt | awk '{s+=$1} END{print s+0}')
+          FAILED=$(grep -oE '[0-9]+ failed' /tmp/test-output.txt | awk '{s+=$1} END{print s+0}')
+          if [ "$((PASSED + FAILED))" -gt 0 ]; then
+            echo "tests=${PASSED}/$((PASSED + FAILED))" >> "$GITHUB_OUTPUT"
+          else
+            echo "tests=${{ steps.tests.outcome == 'success' && 'pass' || 'fail' }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      # `if: always()` is the whole point. A red build must publish a red status
+      # — otherwise the last green file stays up and the site keeps claiming a
+      # pass that is no longer true.
       - name: Write status
+        if: always()
         run: |
           mkdir -p status
           cat > status/stable.json <<EOF
@@ -81,21 +140,41 @@ jobs:
             "checked_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
             "versions": {
               "godot": "${{ env.GODOT_PIN }}",
-              "rust": "1.94.0",
-              "gdext": "410580d477fe150e12fd9649cf5ab12a800a1884"
+              "rust": "${{ steps.measure.outputs.rust }}",
+              "gdext": "${{ steps.measure.outputs.gdext }}",
+              "gdext_rev": "${{ steps.measure.outputs.gdext_rev }}"
             },
-            "build": "pass",
-            "tests": "pass",
-            "import": "pass"
+            "build": "${{ steps.build.outcome == 'success' && 'pass' || 'fail' }}",
+            "tests": "${{ steps.measure.outputs.tests }}",
+            "import": "${{ steps.import.outcome == 'success' && 'pass' || 'fail' }}",
+            "notice": "${{ steps.measure.outputs.notice }}",
+            "modules": ${{ steps.measure.outputs.modules }},
+            "loc": ${{ steps.measure.outputs.loc }}
           }
           EOF
+          cat status/stable.json
 
       - name: Publish status
-        if: github.event_name != 'pull_request'
+        if: always() && github.event_name != 'pull_request'
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
           commit_message: "ci: update stable status"
           file_pattern: status/*.json rust/Cargo.lock
+
+      # Last, so the run is red when it should be — but only after the truth
+      # has been published. Ordering these the other way would trade an honest
+      # status file for a red badge.
+      - name: Fail the run if any check failed
+        if: always()
+        run: |
+          BUILD="${{ steps.build.outcome }}"
+          TESTS="${{ steps.tests.outcome }}"
+          IMPORT="${{ steps.import.outcome }}"
+          echo "build=$BUILD tests=$TESTS import=$IMPORT"
+          if [ "$BUILD" != "success" ] || [ "$TESTS" != "success" ] || [ "$IMPORT" != "success" ]; then
+            echo "::error::the pinned combination is broken; status published as failing"
+            exit 1
+          fi
 
   # ── CANARY: builds against latest. Allowed to fail; failure is early warning. ──
   canary:
