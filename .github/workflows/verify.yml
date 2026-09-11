@@ -1,6 +1,6 @@
 name: verify
 
-# Runs on every change, and weekly with nobody touching anything — a template
+# Runs on every change, and daily with nobody touching anything — a template
 # can break because the world moved, not because the code did.
 on:
   push:
@@ -9,8 +9,9 @@ on:
   schedule:
     # Daily. Actions minutes are free for public repos, and the canary tracks
     # a moving target — a daily run means one day of upstream commits to diff
-    # when it breaks, not seven. It also keeps the user-facing "verified"
-    # timestamp fresh.
+    # when it breaks, not seven. The user-facing "verified" age comes from the
+    # record of this run, not from anything the run writes down, so the line
+    # stays fresh whether or not the status changed.
     - cron: "0 4 * * *"   # 04:00 UTC daily
   workflow_dispatch:
 
@@ -154,12 +155,100 @@ jobs:
           EOF
           cat status/stable.json
 
+      # A run that found nothing new should leave nothing behind. checked_at
+      # moves on every run by construction, so the comparison ignores it: if
+      # the rest of the file is identical, there is no commit. Freshness is not
+      # lost by this — the site reads the timestamp of the last successful run
+      # from the Actions API, which is GitHub's record of what CI did rather
+      # than a file the run wrote about itself.
+      #
+      # When something did move, the message says what moved. Thirty-five
+      # identical "ci: update stable status" lines hid the day the Rust version
+      # changed, which is the one line in that log anyone would have wanted.
       - name: Publish status
         if: always() && github.event_name != 'pull_request'
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          commit_message: "ci: update stable status"
-          file_pattern: status/*.json rust/Cargo.lock
+        run: |
+          set -euo pipefail
+
+          NEW=$(cat status/stable.json)
+          OLD=$(git show HEAD:status/stable.json 2>/dev/null || true)
+
+          LOCK_CHANGED=false
+          git diff --quiet -- rust/Cargo.lock 2>/dev/null || LOCK_CHANGED=true
+
+          SUMMARY=""
+          add() {
+            if [ -z "$SUMMARY" ]; then SUMMARY="$1"; else SUMMARY="$SUMMARY, $1"; fi
+          }
+
+          if [ -z "$OLD" ]; then
+            SUMMARY="publish first stable status"
+          elif [ "$(printf '%s' "$NEW" | jq -S 'del(.checked_at)')"               = "$(printf '%s' "$OLD" | jq -S 'del(.checked_at)')" ]; then
+            # Nothing but the clock. The new file stays in the working tree
+            # uncommitted, so the keepalive step below can still use it if the
+            # repo has gone quiet long enough to need it.
+            if [ "$LOCK_CHANGED" = false ]; then
+              echo "Status unchanged since the last run — nothing to commit."
+              exit 0
+            fi
+            SUMMARY="update Cargo.lock"
+          else
+            for k in godot rust gdext; do
+              O=$(printf '%s' "$OLD" | jq -r ".versions.$k // \"none\"")
+              N=$(printf '%s' "$NEW" | jq -r ".versions.$k // \"none\"")
+              [ "$O" = "$N" ] || add "$k $O → $N"
+            done
+            for k in build tests import notice; do
+              O=$(printf '%s' "$OLD" | jq -r ".$k // \"none\"")
+              N=$(printf '%s' "$NEW" | jq -r ".$k // \"none\"")
+              [ "$O" = "$N" ] || add "$k $O → $N"
+            done
+            # gdext_rev moves with gdext often enough that naming both is
+            # noise; modules and loc are worth a mention but not a number.
+            if [ "$(printf '%s' "$OLD" | jq -S '{modules,loc}')"               != "$(printf '%s' "$NEW" | jq -S '{modules,loc}')" ]; then
+              add "measurements changed"
+            fi
+            # Something differed that none of the above names. Say that,
+            # rather than committing under an empty message.
+            [ -n "$SUMMARY" ] || SUMMARY="stable status changed"
+          fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add status/stable.json
+          if [ -f rust/Cargo.lock ]; then git add rust/Cargo.lock; fi
+          if git diff --cached --quiet; then
+            echo "Nothing staged after all — not committing."
+            exit 0
+          fi
+          git commit -m "ci: $SUMMARY"
+          git push
+
+      # GitHub switches off scheduled workflows in a public repo after 60 days
+      # with no repository activity. Until now the daily status commit supplied
+      # that activity as a side effect. With quiet runs no longer committing, a
+      # stable template nobody touches would have its schedule silently
+      # disabled — which is precisely the template most worth still checking.
+      #
+      # So the activity becomes deliberate and rare: one commit when the repo
+      # is approaching quiet, none otherwise. checked_at is the payload because
+      # it is a fact this run actually established, and the message says why
+      # the commit exists so it is never mistaken for a real change.
+      - name: Keep the schedule alive
+        if: always() && github.event_name == 'schedule'
+        run: |
+          set -euo pipefail
+
+          DAYS=$(( ( $(date -u +%s) - $(git log -1 --format=%ct) ) / 86400 ))
+          echo "Last commit on this branch: ${DAYS}d ago (schedule expires at 60d)."
+          if [ "$DAYS" -lt 50 ]; then exit 0; fi
+
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add status/stable.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "ci: keepalive after ${DAYS}d quiet (schedule expires at 60d)"
+          git push
 
       # Last, so the run is red when it should be — but only after the truth
       # has been published. Ordering these the other way would trade an honest
